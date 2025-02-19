@@ -2,6 +2,10 @@ spring:
   application:
     name: swift-microgateway
 
+  config:
+    import:
+      - "file:D:/config/client-secret.yml"
+      - "file:D:/config/config.yml"
   security:
     user:
       name: admin   # Username
@@ -15,9 +19,9 @@ spring:
     gateway:
       routes:
         - id: swift-service
-          uri: https://sandbox.swift.com
+          uri: ${external.swift-uri}
           predicates:
-            - Path=/**
+            - Path=${external.swift-uri-path}
           filters:
             - name: RequestRateLimiter
               args:

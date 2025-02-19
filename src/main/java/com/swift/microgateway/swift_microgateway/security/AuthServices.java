@@ -2,11 +2,12 @@ package com.swift.microgateway.swift_microgateway.security;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.swift.microgateway.swift_microgateway.common.AESEncryptionHelper;
+import com.swift.microgateway.swift_microgateway.common.PropertiesService;
 import com.swift.microgateway.swift_microgateway.configuration.Constants;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.http.HttpStatusCode;
 import org.springframework.http.ResponseEntity;
 import org.springframework.stereotype.Service;
 
@@ -30,25 +31,27 @@ public class AuthServices {
     JwtUtil jwtUtil;
     @Autowired
     SecurityCredentialService securityCredentialService;
-
-    public ResponseEntity<JsonNode> authentication(UserLogin userLogin) {
+    @Autowired
+    PropertiesService propertiesService;
+    public ResponseEntity<JsonNode> authentication(String clintId,String scope) {
         try {
 
-            String consumerKey = userLogin.getClintId();
+            String consumerSecret = AESEncryptionHelper.decrypt(propertiesService.getPropertyValue("external.clint-secret"),propertiesService.getPropertyValue("external.key"));
+
             CompletableFuture<SecurityCredentialService.SecurityCredentials> securityCredentialsCompletableFuture = securityCredentialService.fetchSecurityCredentials(Server);
             String key = securityCredentialsCompletableFuture.get().getPrivateKey();
             String certificate = securityCredentialsCompletableFuture.get().getCertificate();
-            String jwt = jwtUtil.generateJwtToken(consumerKey, key, certificate);
+            String jwt = jwtUtil.generateJwtToken(clintId, key, certificate);
 
-            if (JwtUtil.validateJWT(jwt,consumerKey)){
-              return callTokenApi(jwt, consumerKey, userLogin.getClintSecrets(), userLogin.getScope());
+            if (JwtUtil.validateJWT(jwt,clintId)){
+              return callTokenApi(jwt, clintId, consumerSecret, scope);
             }
             else {
                 throw new IllegalArgumentException("Invalid JWT token");
             }
 
         } catch (Exception e) {
-            e.printStackTrace();
+           logger.error(" Exception "+e);
             return null;
         }
 
@@ -92,16 +95,19 @@ public class AuthServices {
 
     }
 
-    public ResponseEntity<JsonNode> refreshToken(String refreshToken, String username, String password, String scop) throws Exception {
+    public ResponseEntity<JsonNode> refreshToken(String refreshToken, String username, String scop) throws Exception {
 
         // API URL
         String url = Constants.PROTOCOL+Constants.SERVER+Constants.GTW_OAUTH_SERVICE;
+
+        String consumerSecret = AESEncryptionHelper.decrypt(propertiesService.getPropertyValue("external.clint-secret"),propertiesService.getPropertyValue("external.key"));
+
 
         // Create an ObjectMapper for converting JSON
         ObjectMapper objectMapper = new ObjectMapper();
 
         // Prepare Basic Authentication header
-        String auth = username + ":" + password;
+        String auth = username + ":" + consumerSecret;
         String encodedAuth = Base64.getEncoder().encodeToString(auth.getBytes(StandardCharsets.UTF_8));
         String authHeader = "Basic " + encodedAuth;
 

@@ -20,7 +20,8 @@ public class JwtUtil {
 
     public  String generateJwtToken(String consumerKey,String privateKey,String certificate) {
         try {
-            String audience = "sandbox.swift.com/oauth2/v1/token";
+            String audience = Constants.AUDIENCE;
+
             String subject = "CN=demo-swift-sandbox-consumer, O=Demo, L=London, S=London, C=GB";
             long expirationTime = 900 * 1000L; // 15 minutes in milliseconds
             long currentTime = System.currentTimeMillis();
