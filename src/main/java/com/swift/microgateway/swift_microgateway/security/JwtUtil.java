@@ -1,14 +1,17 @@
 package com.swift.microgateway.swift_microgateway.security;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.swift.microgateway.swift_microgateway.common.AESEncryptionHelper;
+import com.swift.microgateway.swift_microgateway.common.PropertiesService;
 import com.swift.microgateway.swift_microgateway.configuration.Constants;
 import io.jsonwebtoken.*;
-import lombok.Setter;
 import org.bouncycastle.util.io.pem.PemObject;
 import org.bouncycastle.util.io.pem.PemReader;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
 import java.io.StringReader;
+import java.security.Key;
 import java.security.KeyFactory;
 import java.security.PrivateKey;
 import java.security.spec.PKCS8EncodedKeySpec;
@@ -17,6 +20,8 @@ import java.util.*;
 @Service
 public class JwtUtil {
 
+    @Autowired
+    PropertiesService propertiesService;
 
     public  String generateJwtToken(String consumerKey,String privateKey,String certificate) {
         try {
@@ -31,16 +36,14 @@ public class JwtUtil {
 
             // Prepare JWT Claims
             return Jwts.builder()
-                    .setIssuer(consumerKey)  // "iss"
+                    .issuer(consumerKey)  // "iss"
                     .setAudience(audience)   // "aud"
-                    .setSubject(subject)     // "sub"
-                    .setId(UUID.randomUUID().toString())  // "jti"
-                    .setIssuedAt(new Date(currentTime - 1000))  // "iat" (-1s for clock skew)
-                    .setExpiration(new Date(currentTime + expirationTime)) // "exp"
-                    .setId(generateSecureJTI())
-                    .setHeaderParam("typ", "JWT")  // Header: "typ"
-                    .setHeaderParam("alg", "RS256")  // Header: "alg"
-                    .setHeaderParam("x5c", new String[]{certificate.replaceAll("\\s+", "")})  // "x5c"
+                    .subject(subject)     // "sub"
+                    .id(UUID.randomUUID().toString())  // "jti"
+                    .issuedAt(new Date(currentTime - 1000))  // "iat" (-1s for clock skew)
+                    .expiration(new Date(currentTime + expirationTime)) // "exp"
+                    .id(generateSecureJTI())
+                    .header().add("typ", "JWT").add("alg", "RS256").add("x5c", new String[]{certificate.replaceAll("\\s+", "")}).and()
                     .signWith(SignatureAlgorithm.RS256, pk)  // Sign JWT
                     .compact();
 
@@ -119,5 +122,40 @@ public class JwtUtil {
             System.out.println("❌ Unexpected error: " + e.getMessage());
         }
         return false;
+    }
+
+    public String getJwtForNonRepudiation(String certificate,String privateKey, String audience,String digest)
+    {
+        try {
+
+
+            String subject = "CN=demo-swift-sandbox-consumer, O=Demo, L=London, S=London, C=GB";
+            long expirationTime = 900 * 1000L; // 15 minutes in milliseconds
+            long currentTime = System.currentTimeMillis();
+
+            // Convert PEM Private Key to Java PrivateKey Object
+            PrivateKey pk = getPrivateKeyFromPem(privateKey);
+
+            String consumerSecret = AESEncryptionHelper.decrypt(propertiesService.getPropertyValue("external.clint-secret"),propertiesService.getPropertyValue("external.key"));
+
+
+            // Prepare JWT Claims
+            return Jwts.builder()
+                    .issuer(consumerSecret)  // "iss"
+                    .setAudience(audience)   // "aud"
+                    .subject(subject)     // "sub"
+                    .id(UUID.randomUUID().toString())  // "jti"
+                    .issuedAt(new Date(currentTime - 1000))  // "iat" (-1s for clock skew)
+                    .claim("digest",digest)
+                    .expiration(new Date(currentTime + expirationTime)) // "exp"
+                    .id(generateSecureJTI())
+                    .header().add("typ", "JWT").add("alg", "RS256").add("x5c", new String[]{certificate.replaceAll("\\s+", "")}).and()
+                    .signWith(SignatureAlgorithm.RS256, pk)  // Sign JWT
+                    .compact();
+
+
+        } catch (Exception e) {
+            throw new RuntimeException("Error generating JWT", e);
+        }
     }
 }
