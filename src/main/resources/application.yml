@@ -1,11 +1,16 @@
 spring:
+  server:
+    port: 8080
+#    servlet:
+#      context-path: /api-gateway
+
   application:
     name: swift-microgateway
 
   config:
     import:
-      - "file:D:/config/client-secret.yml"
-      - "file:D:/config/config.yml"
+      - "file:./usr/local/tomcat/webapps/client-secret.yml"
+      - "file:./usr/local/tomcat/webapps/config.yml"
   security:
     user:
       name: admin   # Username

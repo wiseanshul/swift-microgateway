@@ -3,26 +3,34 @@ package com.swift.microgateway.swift_microgateway.security;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.swift.microgateway.swift_microgateway.common.AESEncryptionHelper;
 import com.swift.microgateway.swift_microgateway.common.PropertiesService;
+import com.swift.microgateway.swift_microgateway.configuration.AccessTokenFilter;
 import com.swift.microgateway.swift_microgateway.configuration.Constants;
 import io.jsonwebtoken.*;
 import org.bouncycastle.util.io.pem.PemObject;
 import org.bouncycastle.util.io.pem.PemReader;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
+import java.io.ByteArrayInputStream;
 import java.io.StringReader;
-import java.security.Key;
-import java.security.KeyFactory;
-import java.security.PrivateKey;
+import java.nio.charset.StandardCharsets;
+import java.security.*;
+import java.security.cert.CertificateFactory;
+import java.security.cert.X509Certificate;
 import java.security.spec.PKCS8EncodedKeySpec;
+import java.security.spec.X509EncodedKeySpec;
 import java.util.*;
+import java.util.concurrent.CompletableFuture;
 
 @Service
 public class JwtUtil {
 
+    Logger logger = LoggerFactory.getLogger(JwtUtil.class);
     @Autowired
     PropertiesService propertiesService;
-
+    @Autowired SecurityCredentialService securityCredentialService;
     public  String generateJwtToken(String consumerKey,String privateKey,String certificate) {
         try {
             String audience = Constants.AUDIENCE;
@@ -73,6 +81,27 @@ public class JwtUtil {
         PKCS8EncodedKeySpec keySpec = new PKCS8EncodedKeySpec(keyBytes);
         KeyFactory keyFactory = KeyFactory.getInstance("RSA");
         return keyFactory.generatePrivate(keySpec);
+    }
+
+    public static PublicKey getPublicKeyFromCert(String pemCert) throws Exception {
+        // Remove PEM headers and footers if present
+        String certContent = pemCert
+                .replace("-----BEGIN CERTIFICATE-----", "")
+                .replace("-----END CERTIFICATE-----", "")
+                .replaceAll("\\s", ""); // Remove whitespace
+
+        // Decode base64 certificate
+        byte[] certBytes = Base64.getDecoder().decode(certContent);
+
+        // Create certificate factory
+        CertificateFactory certFactory = CertificateFactory.getInstance("X.509");
+
+        // Generate certificate from bytes
+        X509Certificate certificate = (X509Certificate) certFactory
+                .generateCertificate(new ByteArrayInputStream(certBytes));
+
+        // Extract and return the public key
+        return certificate.getPublicKey();
     }
 
     public static boolean validateJWT(String jwt,String consumerKey) {
@@ -156,6 +185,71 @@ public class JwtUtil {
 
         } catch (Exception e) {
             throw new RuntimeException("Error generating JWT", e);
+        }
+    }
+
+    public Boolean verifyJwtSignatureAndExpiration(String xSwiftIntegrity) {
+        if (xSwiftIntegrity == null) {
+            logger.error("X-SWIFT-Integrity header is missing when expected");
+            throw new SecurityException("Missing X-SWIFT-Integrity header");
+        }
+
+        try {
+            String Server = Constants.PROTOCOL + Constants.SERVER;
+            CompletableFuture<SecurityCredentialService.SecurityCredentials> securityCredentialsCompletableFuture = securityCredentialService.fetchSecurityCredentials(Server);
+            String certificate = securityCredentialsCompletableFuture.get().getCertificate();
+            logger.error("certificate : "+certificate);
+            PublicKey pk = JwtUtil.getPublicKeyFromCert(certificate);
+            logger.error("pk : "+pk);
+            // Parse and verify the JWT signature
+            Jws<Claims> jws = Jwts.parser()
+                    .setSigningKey(pk) // Verify with API provider's public key
+                    .build()
+                    .parseClaimsJws(xSwiftIntegrity);
+
+            Claims claims = jws.getBody();
+
+            // Validate expiration
+            long exp = claims.getExpiration().getTime() / 1000; // Convert to seconds
+            long currentTime = System.currentTimeMillis() / 1000;
+            if (currentTime > exp) {
+                logger.error("JWT has expired. Expiration: " + exp + ", Current Time: " + currentTime);
+               return false;
+            }
+
+            logger.info("X-SWIFT-Integrity header validated successfully");
+            logger.info("Expiration: " + exp + ", Current Time: " + currentTime);
+            return true;
+        } catch (io.jsonwebtoken.SignatureException e) {
+            logger.error("Invalid JWT signature: " + e.getMessage());
+            return false;
+        } catch (io.jsonwebtoken.ExpiredJwtException e) {
+            logger.error("JWT has expired: " + e.getMessage());
+            throw new SecurityException("JWT expired", e);
+        } catch (Exception e) {
+            logger.error("Failed to verify X-SWIFT-Integrity: " + e.getMessage());
+            e.printStackTrace();
+            throw new SecurityException("Invalid X-SWIFT-Integrity header", e);
+        }
+    }
+
+    public static String extractDigestFromJwt(String jwtToken) throws JwtException {
+        try {
+            // Parse the JWT token without verifying the signature
+            Claims claims = Jwts.parser()
+                    .build() // Creates a JwtParser
+                    .parseClaimsJws(jwtToken) // Parses the JWT
+                    .getBody(); // Gets the payload (claims)
+
+            // Extract the "digest" claim from the payload
+            String digest = claims.get("digest", String.class);
+            if (digest == null) {
+                throw new JwtException("Digest claim not found in JWT");
+            }
+            return digest;
+        } catch (JwtException e) {
+            //("Failed to extract digest from JWT: " + e.getMessage(), e);
+            return "";
         }
     }
 }
