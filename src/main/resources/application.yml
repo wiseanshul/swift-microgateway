@@ -11,11 +11,6 @@ spring:
     import:
       - "file:./usr/local/tomcat/webapps/client-secret.yml"
       - "file:./usr/local/tomcat/webapps/config.yml"
-  security:
-    user:
-      name: admin   # Username
-      password: admin123  # Password
-
   redis:
     host: localhost
     port: 6379
